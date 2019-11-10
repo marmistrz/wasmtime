@@ -77,12 +77,93 @@ pub(crate) fn clock_time_get(clock_id: wasi::__wasi_clockid_t) -> Result<wasi::_
     duration.as_nanos().try_into().map_err(Into::into)
 }
 
+fn stdin_nonempty() -> bool {
+    use std::io::Read;
+    std::io::stdin().bytes().peekable().peek().is_some()
+}
+
 pub(crate) fn poll_oneoff(
     timeout: Option<ClockEventData>,
     fd_events: Vec<FdEventData>,
     events: &mut Vec<wasi::__wasi_event_t>,
-) -> Result<Vec<wasi::__wasi_event_t>> {
-    unimplemented!("poll_oneoff")
+) -> Result<()> {
+    use crate::fdentry::Descriptor;
+    if fd_events.is_empty() && timeout.is_none() {
+        return Ok(());
+    }
+
+    // Currently WASI file support is only (a) regular files (b) directories (c) symlinks on Windows,
+    // which are always ready to write on Unix.
+    //
+    // We need to consider stdin/stdout/stderr separately. We treat stdout/stderr as always ready to write
+    // and only poll the stdin.
+    let mut stdin_events = vec![];
+    let mut immediate_events = vec![];
+
+    for event in fd_events {
+        match event.descriptor {
+            Descriptor::Stdin => stdin_events.push(event),
+            _ => immediate_events.push(event),
+        }
+    }
+
+    // we have at least one immediate event, so we don't need to care about stdin
+    if immediate_events.len() > 0 {
+        for event in immediate_events {
+            let size = match event.descriptor {
+                Descriptor::OsFile(os_file) if event.r#type == wasi::__WASI_EVENTTYPE_FD_READ => {
+                    os_file
+                        .metadata()
+                        .expect("FIXME return a proper error")
+                        .len()
+                }
+                Descriptor::Stdin => panic!("Descriptor::Stdin should have been filtered out"),
+                // On Unix, ioctl(FIONREAD) will return 0 for stdout/stderr. Emulate the same behavior on Windows.
+                //
+                // Besides, the spec is unclear what nbytes should actually be for __WASI_EVENTTYPE_FD_WRITE and
+                // the implementation on Unix just returns 0 here, so it's probably fine to do the same on Windows for now.
+                // cf. https://github.com/WebAssembly/WASI/issues/148
+                _ => 0,
+            };
+
+            events.push(wasi::__wasi_event_t {
+                userdata: event.userdata,
+                r#type: event.r#type,
+                error: wasi::__WASI_ESUCCESS,
+                u: wasi::__wasi_event_u {
+                    fd_readwrite: wasi::__wasi_event_fd_readwrite_t {
+                        nbytes: size,
+                        flags: 0,
+                    },
+                },
+            })
+        }
+    } else {
+        // We'd like to do the following:
+        // (1) wait in a non-blocking way for data to be available in stdin, with timeout
+        // (2) find out, how many bytes are there available to be read.
+        // Both of these are non-trivial on Windows
+        // TODO describe
+        // 1 -> WaitForSingleObject doesn't work
+        assert_ne!(stdin_events.len(), 0, "stdin_events should not be empty");
+        unimplemented!("polling stdin on Windows not supported yet");
+        // FIXME actually wait for stdin instead of timeouting
+        // for event in stdin_events {
+        //     events.push(wasi::__wasi_event_t {
+        //         userdata: timeout.unwrap().userdata, // FIXME
+        //         r#type: wasi::__WASI_EVENTTYPE_CLOCK,
+        //         error: wasi::__WASI_ESUCCESS,
+        //         u: wasi::__wasi_event_u {
+        //             fd_readwrite: wasi::__wasi_event_fd_readwrite_t {
+        //                 nbytes: 0,
+        //                 flags: 0,
+        //             },
+        //         },
+        //     });
+        // }
+    }
+
+    Ok(())
 }
 
 fn get_monotonic_time() -> Duration {

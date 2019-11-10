@@ -5,7 +5,7 @@ use wasi::wasi_unstable;
 use wasi_misc_tests::{
     open_scratch_directory,
     utils::{cleanup_file, close_fd},
-    wasi_wrappers::wasi_path_open,
+    wasi_wrappers::{wasi_fd_write, wasi_path_open},
 };
 
 const CLOCK_ID: wasi_unstable::Userdata = 0x0123_45678;
@@ -98,6 +98,21 @@ unsafe fn test_stdin_read() {
         wasi_unstable::EVENTTYPE_CLOCK,
         "the event.type_ should equal clock"
     );
+
+    // Write to file
+    let contents = &['c' as u8];
+    let ciovec = wasi_unstable::CIoVec {
+        buf: contents.as_ptr() as *const libc::c_void,
+        buf_len: contents.len(),
+    };
+    let mut nwritten = 0;
+    let status = wasi_fd_write(wasi_unstable::STDIN_FD, &[ciovec], &mut nwritten);
+    assert_eq!(
+        status,
+        wasi_unstable::raw::__WASI_ESUCCESS,
+        "writing byte to stdin"
+    );
+    assert_eq!(nwritten, 0, "nwritten bytes check");
 }
 
 unsafe fn test_stdout_stderr_write() {

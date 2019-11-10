@@ -30,7 +30,7 @@ pub(crate) fn clock_res_get(clock_id: wasi::__wasi_clockid_t) -> Result<wasi::__
         // * NtQueryTimerResolution, which is undocumented and thus not exposed by the winapi crate
         // * timeGetDevCaps, which returns the upper and lower bound for the precision, in ms.
         // While the upper bound seems like something we could use, it's typically too high to be meaningful.
-        // For instance, the intervals return by the syscall are:
+        // For instance, the intervals returned by the syscall are:
         // * [1, 65536] on Wine
         // * [1, 1000000] on Windows 10, which is up to (sic) 1000 seconds.
         //

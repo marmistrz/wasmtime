@@ -99,6 +99,16 @@ pub(crate) fn path_open(
     use nix::fcntl::{openat, AtFlags, OFlag};
     use nix::sys::stat::{fstatat, Mode, SFlag};
 
+    // As per open(2):
+    // The (undefined) effect of O_RDONLY | O_TRUNC varies among
+    // implementations.  On many systems the file is actually truncated.
+    //
+    // To be on the safe side, we reject attempts at truncation whenever
+    // we don't have the rights to write.
+    if !write && oflags & wasi::__WASI_O_TRUNC != 0 {
+        return Err(Error::ENOTCAPABLE);
+    }
+
     let mut nix_all_oflags = if read && write {
         OFlag::O_RDWR
     } else if write {

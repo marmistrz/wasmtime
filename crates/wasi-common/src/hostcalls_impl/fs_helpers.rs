@@ -26,8 +26,8 @@ impl PathGet {
 /// This is a workaround for not having Capsicum support in the OS.
 pub(crate) fn path_get(
     fe: &FdEntry,
-    rights_base: wasi::__wasi_rights_t,
-    rights_inheriting: wasi::__wasi_rights_t,
+    needed_rights_base: wasi::__wasi_rights_t,
+    needed_rights_inheriting: wasi::__wasi_rights_t,
     dirflags: wasi::__wasi_lookupflags_t,
     path: &str,
     needs_final_component: bool,
@@ -45,7 +45,7 @@ pub(crate) fn path_get(
     }
 
     let dirfd = fe
-        .as_descriptor(rights_base, rights_inheriting)?
+        .as_descriptor(needed_rights_base, needed_rights_inheriting)?
         .as_file()?
         .try_clone()?;
 

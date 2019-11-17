@@ -16,6 +16,7 @@ impl PathGetExt for PathGet {
     }
 }
 
+/// Return all the *needed* rights for the new file descriptor.
 pub(crate) fn path_open_rights(
     rights_base: wasi::__wasi_rights_t,
     rights_inheriting: wasi::__wasi_rights_t,

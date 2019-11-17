@@ -542,6 +542,11 @@ pub(crate) unsafe fn path_open(
 
     let (needed_base, needed_inheriting) =
         path_open_rights(fs_rights_base, fs_rights_inheriting, oflags, fs_flags);
+    trace!(
+        "      | (needed_base, needed inheriting) = ({}, {})",
+        needed_base,
+        needed_inheriting
+    );
     let fe = wasi_ctx.get_fd_entry(dirfd)?;
     let resolved = path_get(
         fe,
@@ -552,14 +557,18 @@ pub(crate) unsafe fn path_open(
         oflags & wasi::__WASI_O_CREAT != 0,
     )?;
 
-    // which open mode do we need?
-    let read = fs_rights_base & (wasi::__WASI_RIGHT_FD_READ | wasi::__WASI_RIGHT_FD_READDIR) != 0;
-    let write = fs_rights_base
-        & (wasi::__WASI_RIGHT_FD_DATASYNC
-            | wasi::__WASI_RIGHT_FD_WRITE
-            | wasi::__WASI_RIGHT_FD_ALLOCATE
-            | wasi::__WASI_RIGHT_FD_FILESTAT_SET_SIZE)
+    // Which open mode can we get?
+    // In WASI we don't expect the caller to declare the read-only/write-only
+    // access mode beforehand, so we're using all the modes we can.
+    let read = (wasi::__WASI_RIGHT_FD_READ | wasi::__WASI_RIGHT_FD_READDIR) != 0;
+    let can_write = (wasi::__WASI_RIGHT_FD_DATASYNC
+        | wasi::__WASI_RIGHT_FD_WRITE
+        | wasi::__WASI_RIGHT_FD_ALLOCATE
+        | wasi::__WASI_RIGHT_FD_FILESTAT_SET_SIZE)
         != 0;
+    let write = can_write && (oflags & wasi::__WASI_O_DIRECTORY) == 0;
+    trace!("     | read={}, can_write={}, write={}", read, can_write, write);
+
 
     let fd = hostcalls_impl::path_open(resolved, read, write, oflags, fs_flags)?;
 

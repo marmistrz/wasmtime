@@ -88,6 +88,7 @@ pub(crate) fn path_link(resolved_old: PathGet, resolved_new: PathGet) -> Result<
     }
 }
 
+/// Either read or write should be true.
 pub(crate) fn path_open(
     resolved: PathGet,
     read: bool,
@@ -99,12 +100,11 @@ pub(crate) fn path_open(
     use nix::fcntl::{openat, AtFlags, OFlag};
     use nix::sys::stat::{fstatat, Mode, SFlag};
 
-    let mut nix_all_oflags = if read && write {
-        OFlag::O_RDWR
-    } else if write {
-        OFlag::O_WRONLY
-    } else {
-        OFlag::O_RDONLY
+    let mut nix_all_oflags = match (read, write) {
+        (true, true) => OFlag::O_RDWR,
+        (false, true) => OFlag::O_WRONLY,
+        (true, false) => OFlag::O_RDONLY,
+        (false, false) => panic!("Either read or write should be true"),
     };
 
     // on non-Capsicum systems, we always want nofollow

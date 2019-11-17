@@ -91,6 +91,7 @@ pub(crate) fn path_link(resolved_old: PathGet, resolved_new: PathGet) -> Result<
     unimplemented!("path_link")
 }
 
+/// Either read or write should be true.
 pub(crate) fn path_open(
     resolved: PathGet,
     read: bool,
@@ -99,6 +100,8 @@ pub(crate) fn path_open(
     fdflags: wasi::__wasi_fdflags_t,
 ) -> Result<File> {
     use winx::file::{AccessMode, CreationDisposition, Flags};
+
+    assert!(read || write, "Either read or write should be true");
 
     let mut access_mode = AccessMode::READ_CONTROL;
     if read {

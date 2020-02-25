@@ -9,7 +9,7 @@ use crate::sys::fdentry_impl::{determine_type_rights, OsHandle};
 use crate::sys::host_impl::{self, path_from_host};
 use crate::sys::hostcalls_impl::fs_helpers::PathGetExt;
 use crate::{wasi, Error, Result};
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use std::convert::TryInto;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Seek, SeekFrom};
@@ -17,6 +17,7 @@ use std::os::windows::fs::{FileExt, OpenOptionsExt};
 use std::os::windows::prelude::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 use winx::file::{AccessMode, CreationDisposition, FileModeInformation, Flags};
+use winx::winerror::WinError;
 
 fn read_at(mut file: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
     // get current cursor position
@@ -125,7 +126,40 @@ pub(crate) fn path_create_directory(resolved: PathGet) -> Result<()> {
 }
 
 pub(crate) fn path_link(resolved_old: PathGet, resolved_new: PathGet) -> Result<()> {
-    unimplemented!("path_link")
+    use std::fs;
+    let old_path = resolved_old.concatenate()?;
+    let new_path = resolved_new.concatenate()?;
+    fs::hard_link(&old_path, &new_path).or_else(|e| {
+        match e.raw_os_error() {
+            Some(e) => {
+                log::debug!("path_link at fs::hard_link error code={:?}", e);
+                match WinError::from_u32(e as u32) {
+                    WinError::ERROR_ACCESS_DENIED => {
+                        if new_path.exists() {
+                            // the target already exists
+                            Err(Error::EEXIST)
+                        } else {
+                            Err(WinError::ERROR_ACCESS_DENIED.into())
+                        }
+                    }
+                    WinError::ERROR_INVALID_NAME => {
+                        // does the target without trailing slashes exist?
+                        if let Some(path) = strip_trailing_slashes_and_concatenate(&resolved_new)? {
+                            if path.exists() {
+                                return Err(Error::EEXIST);
+                            }
+                        }
+                        Err(WinError::ERROR_INVALID_NAME.into())
+                    }
+                    e => Err(e.into()),
+                }
+            }
+            None => {
+                log::debug!("Inconvertible OS error: {}", e);
+                Err(Error::EIO)
+            }
+        }
+    })
 }
 
 pub(crate) fn path_open(
@@ -180,7 +214,6 @@ pub(crate) fn path_open(
         }
         Err(e) => match e.raw_os_error() {
             Some(e) => {
-                use winx::winerror::WinError;
                 log::debug!("path_open at symlink_metadata error code={:?}", e);
                 let e = WinError::from_u32(e as u32);
 
@@ -430,8 +463,6 @@ pub(crate) fn path_rename(resolved_old: PathGet, resolved_new: PathGet) -> Resul
 
     fs::rename(&old_path, &new_path).or_else(|e| match e.raw_os_error() {
         Some(e) => {
-            use winx::winerror::WinError;
-
             log::debug!("path_rename at rename error code={:?}", e);
             match WinError::from_u32(e as u32) {
                 WinError::ERROR_ACCESS_DENIED => {
@@ -497,7 +528,6 @@ pub(crate) fn path_filestat_set_times(
 
 pub(crate) fn path_symlink(old_path: &str, resolved: PathGet) -> Result<()> {
     use std::os::windows::fs::{symlink_dir, symlink_file};
-    use winx::winerror::WinError;
 
     let old_path = concatenate(resolved.dirfd(), Path::new(old_path))?;
     let new_path = resolved.concatenate()?;
@@ -513,9 +543,13 @@ pub(crate) fn path_symlink(old_path: &str, resolved: PathGet) -> Result<()> {
                         symlink_dir(old_path, new_path).map_err(Into::into)
                     }
                     WinError::ERROR_ACCESS_DENIED => {
-                        // does the target exist?
                         if new_path.exists() {
+                            // the target already exists
                             Err(Error::EEXIST)
+                        } else if !old_path.exists() {
+                            // attempt to create a dangling symlink
+                            warn!("Dangling symlink or symlink loops unsupported on Windows");
+                            Err(Error::ENOTSUP)
                         } else {
                             Err(WinError::ERROR_ACCESS_DENIED.into())
                         }
@@ -542,7 +576,6 @@ pub(crate) fn path_symlink(old_path: &str, resolved: PathGet) -> Result<()> {
 
 pub(crate) fn path_unlink_file(resolved: PathGet) -> Result<()> {
     use std::fs;
-    use winx::winerror::WinError;
 
     let path = resolved.concatenate()?;
     let file_type = path
